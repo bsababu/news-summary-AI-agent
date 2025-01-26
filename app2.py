@@ -3,6 +3,12 @@ from bs4 import BeautifulSoup
 import requests
 import json
 from transformers import pipeline
+import schedule
+import time
+import threading
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 
 st.title("📰 News Summarizer")
@@ -14,8 +20,8 @@ def load_summarizer():
 
 summarizer = load_summarizer()
 
-
 root = "https://www.newtimes.co.rw/rwanda"
+
 
 def pull_from_web(url):
     try:
@@ -43,7 +49,7 @@ def fetch_articles():
     sup = BeautifulSoup(urll.text, 'html.parser')
     content_links = sup.find_all('div', class_="article-title")
     if content_links:
-        for lin in content_links[6:11]:  # Fetch the first 5 articles
+        for lin in content_links[6:11]:
             linkx = lin.find('a', href=True)
             if linkx:
                 article = pull_from_web(linkx['href'])
@@ -51,15 +57,82 @@ def fetch_articles():
                     articles.append(article)
     return articles
 
+def send_email(email, subject, body):
+    sender_email = "oscobosco@gmail.com"
+    sender_password = "otle wlex iezf hpzc"
 
-if st.button("Fetch and Summarize Articles"):
-    with st.spinner("Fetching and summarizing articles..."):
-        articles = fetch_articles()
-        if articles:
-            for article in articles:
-                st.subheader(article["Title"])
-                st.write(article["Summary"])
-                st.markdown(f"[Read more]({article['URL']})")
-                st.write("---")
-        else:
-            st.error("No articles found or unable to fetch articles.")
+    message = MIMEMultipart()
+    message["From"] = sender_email
+    message["To"] = email
+    message["Subject"] = subject
+    message.attach(MIMEText(body, "plain"))
+
+    try:
+        with smtplib.SMTP("smtp.gmail.com", 587) as server:
+            server.starttls()
+            server.login(sender_email, sender_password)
+            server.sendmail(sender_email, email, message.as_string())
+        st.success(f"Email sent to {email}!")
+    except Exception as e:
+        st.error(f"Failed to send email: {str(e)}")
+
+def fetch_summarize_and_display():
+    articles = fetch_articles()
+    if articles:
+        st.subheader("Latest Articles")
+        for article in articles:
+            st.write(f"**Title:** {article['Title']}")
+            st.write(f"**Summary:** {article['Summary']}")
+            st.markdown(f"[Read more]({article['URL']})")
+            st.write("---")
+
+        email_body = "Here are the latest article summaries:\n\n"
+        for article in articles:
+            email_body += f"Title: {article['Title']}\n"
+            email_body += f"Summary: {article['Summary']}\n"
+            email_body += f"Read more: {article['URL']}\n\n"
+
+        return email_body
+    else:
+        st.warning("No articles found.")
+        return None
+
+
+with st.sidebar:
+    st.header("News Summarizer Agent")
+    email = st.text_input("Enter your email to receive hourly summaries:")
+    search_term = st.text_input("Search for articles by keyword:")
+    search_button = st.button("Search")
+
+if email:
+    st.success(f"Email registered: {email}")
+    if st.button("Start Hourly Summaries"):
+        st.write("Fetching and summarizing articles...")
+        email_body = fetch_summarize_and_display()
+
+        if email_body:
+            send_email(email, "Latest Article Summaries", email_body)
+
+        # Schedule
+        schedule.every(1).hour.do(fetch_summarize_and_display)
+
+        def run_scheduler():
+            while True:
+                schedule.run_pending()
+                time.sleep(1)
+
+        threading.Thread(target=run_scheduler, daemon=True).start()
+
+# Handle search functionality
+if search_button and search_term:
+    articles = fetch_articles()
+    filtered_articles = [article for article in articles if search_term.lower() in article["Title"].lower()]
+    if filtered_articles:
+        st.subheader("Search Results")
+        for article in filtered_articles:
+            st.write(f"**Title:** {article['Title']}")
+            st.write(f"**Summary:** {article['Summary']}")
+            st.markdown(f"[Read more]({article['URL']})")
+            st.write("---")
+    else:
+        st.write("No articles found matching your search term.")
